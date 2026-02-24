@@ -1,6 +1,5 @@
 package net.herotale.herocore.impl.leveling;
 
-import com.hypixel.hytale.component.CommandBuffer;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
@@ -20,8 +19,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p>
  * Uses {@code Ref<EntityStore>} for all runtime operations — no UUID in the API.
  * Level/XP data is read from and written to {@link HeroCoreProgressionComponent}
- * on the entity. Level events are dispatched via {@code CommandBuffer.invoke()},
- * flowing through the native ECS event system.
+ * on the entity. Level events are dispatched via {@code store.invoke()}, flowing through the native ECS event system.
  */
 public class LevelingRegistryImpl implements LevelingRegistry {
 
@@ -52,8 +50,7 @@ public class LevelingRegistryImpl implements LevelingRegistry {
 
     @Override
     public void grantXP(Ref<EntityStore> entityRef, Store<EntityStore> store,
-                         CommandBuffer<EntityStore> cb, String profileId,
-                         double amount, XPSource source) {
+                        String profileId, double amount, XPSource source) {
         LevelingProfile profile = profiles.get(profileId);
         if (profile == null) {
             throw new IllegalArgumentException("Unknown leveling profile: " + profileId);
@@ -72,13 +69,14 @@ public class LevelingRegistryImpl implements LevelingRegistry {
             }
         }
 
-        // Read current progression from the entity's component
+        // Read current progression for this profile from the entity's component
         HeroCoreProgressionComponent progression = store.getComponent(
                 entityRef, HeroCoreProgressionComponent.getComponentType());
         if (progression == null) return;
 
-        int oldLevel = progression.getLevel();
-        long currentXp = (long) progression.getCurrentXP();
+        HeroCoreProgressionComponent.ProfileProgressData data = progression.getProgress(profileId);
+        int oldLevel = data.getLevel();
+        long currentXp = (long) data.getCurrentXP();
         currentXp += Math.round(amount);
 
         // Clamp XP to max
@@ -91,23 +89,22 @@ public class LevelingRegistryImpl implements LevelingRegistry {
         int newLevel = profile.getXpCurve().getLevel(currentXp);
         newLevel = Math.min(newLevel, profile.getMaxLevel());
 
-        // Write back to the entity's component
-        progression.setCurrentXP((float) currentXp);
-        progression.setLevel(newLevel);
-
-        // Calculate XP to next level
+        // XP to next level for this profile
+        float xpToNext = 0f;
         if (newLevel < profile.getMaxLevel()) {
             long nextThreshold = profile.getXpCurve().getThreshold(newLevel + 1);
-            progression.setXpToNextLevel((float) (nextThreshold - currentXp));
-        } else {
-            progression.setXpToNextLevel(0f);
+            xpToNext = (float) (nextThreshold - currentXp);
         }
 
-        // Fire level change events via CommandBuffer — flows through ECS event system
+        // Write back to the entity's component for this profile only
+        progression.setProgress(profileId, new HeroCoreProgressionComponent.ProfileProgressData(
+                newLevel, (float) currentXp, xpToNext));
+
+        // Fire level change events via Store.invoke() (store takes a buffer internally).
         if (newLevel > oldLevel) {
-            cb.invoke(entityRef, new LevelUpEvent(oldLevel, newLevel));
+            store.invoke(entityRef, new LevelUpEvent(profileId, oldLevel, newLevel));
         } else if (newLevel < oldLevel) {
-            cb.invoke(entityRef, new LevelDownEvent(oldLevel, newLevel));
+            store.invoke(entityRef, new LevelDownEvent(profileId, oldLevel, newLevel));
         }
     }
 
@@ -115,14 +112,14 @@ public class LevelingRegistryImpl implements LevelingRegistry {
     public int getLevel(Ref<EntityStore> entityRef, Store<EntityStore> store, String profileId) {
         HeroCoreProgressionComponent progression = store.getComponent(
                 entityRef, HeroCoreProgressionComponent.getComponentType());
-        return progression != null ? progression.getLevel() : 1;
+        return progression != null ? progression.getProgress(profileId).getLevel() : 1;
     }
 
     @Override
     public long getXP(Ref<EntityStore> entityRef, Store<EntityStore> store, String profileId) {
         HeroCoreProgressionComponent progression = store.getComponent(
                 entityRef, HeroCoreProgressionComponent.getComponentType());
-        return progression != null ? (long) progression.getCurrentXP() : 0;
+        return progression != null ? (long) progression.getProgress(profileId).getCurrentXP() : 0;
     }
 
     @Override
@@ -136,15 +133,13 @@ public class LevelingRegistryImpl implements LevelingRegistry {
                 entityRef, HeroCoreProgressionComponent.getComponentType());
         if (progression == null) return;
 
-        progression.setCurrentXP((float) xp);
         int newLevel = Math.min(profile.getXpCurve().getLevel(xp), profile.getMaxLevel());
-        progression.setLevel(newLevel);
-
+        float xpToNext = 0f;
         if (newLevel < profile.getMaxLevel()) {
             long nextThreshold = profile.getXpCurve().getThreshold(newLevel + 1);
-            progression.setXpToNextLevel((float) (nextThreshold - xp));
-        } else {
-            progression.setXpToNextLevel(0f);
+            xpToNext = (float) (nextThreshold - xp);
         }
+        progression.setProgress(profileId, new HeroCoreProgressionComponent.ProfileProgressData(
+                newLevel, (float) xp, xpToNext));
     }
 }

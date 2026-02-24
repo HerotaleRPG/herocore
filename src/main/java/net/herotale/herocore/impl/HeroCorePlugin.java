@@ -10,6 +10,7 @@ import com.hypixel.hytale.server.core.plugin.JavaPluginInit;
 import net.herotale.herocore.api.HeroCore;
 import net.herotale.herocore.api.damage.HeroCoreDamageEvent;
 import net.herotale.herocore.api.event.CombatExitEvent;
+import net.herotale.herocore.api.event.LevelDownEvent;
 import net.herotale.herocore.api.event.LevelUpEvent;
 import net.herotale.herocore.api.heal.HeroCoreHealEvent;
 import net.herotale.herocore.api.leveling.XPSource;
@@ -70,6 +71,7 @@ public class HeroCorePlugin extends JavaPlugin {
         reg.registerEntityEventType(HeroCoreDamageEvent.class);
         reg.registerEntityEventType(HeroCoreHealEvent.class);
         reg.registerEntityEventType(LevelUpEvent.class);
+        reg.registerEntityEventType(LevelDownEvent.class);
         reg.registerEntityEventType(CombatExitEvent.class);
 
         // 3. Register HolderSystem — ensures HeroCoreStatsComponent on all entities

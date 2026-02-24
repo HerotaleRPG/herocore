@@ -1,6 +1,5 @@
 package net.herotale.herocore.api.leveling;
 
-import com.hypixel.hytale.component.CommandBuffer;
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
@@ -43,18 +42,17 @@ public interface LevelingRegistry {
      *   <li>Add to stored XP for this profile</li>
      *   <li>Check if new XP total crosses level threshold</li>
      *   <li>If yes: update level, dispatch {@code LevelUpEvent} or {@code LevelDownEvent}
-     *       via {@code cb.invoke()}</li>
+     *       via {@code store.invoke()}</li>
      * </ol>
      *
      * @param entityRef the live entity handle
-     * @param store     the entity store (for reading components)
-     * @param cb        command buffer for dispatching level events
+     * @param store     the entity store (for reading/writing components and dispatching level events)
      * @param profileId the leveling profile ID
      * @param amount    raw XP amount (before multipliers)
      * @param source    where the XP came from
      */
     void grantXP(Ref<EntityStore> entityRef, Store<EntityStore> store,
-                 CommandBuffer<EntityStore> cb, String profileId, double amount, XPSource source);
+                 String profileId, double amount, XPSource source);
 
     /**
      * Get the current level for an entity in a profile.
