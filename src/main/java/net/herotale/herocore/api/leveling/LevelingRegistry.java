@@ -55,6 +55,26 @@ public interface LevelingRegistry {
                  String profileId, double amount, XPSource source);
 
     /**
+     * Remove XP from an entity for a specific profile using explicit loss semantics.
+     * <ol>
+     *   <li>Treat {@code amount} as a positive loss amount</li>
+     *   <li>Apply adjustments based on {@code policy}</li>
+     *   <li>Subtract from stored XP and clamp at 0</li>
+     *   <li>Recompute level from the profile curve</li>
+     *   <li>If level decreased, dispatch {@code LevelDownEvent} via {@code store.invoke()}</li>
+     * </ol>
+     *
+     * @param entityRef the live entity handle
+     * @param store     the entity store (for reading/writing components and dispatching level events)
+     * @param profileId the leveling profile ID
+     * @param amount    positive XP amount to remove
+     * @param source    where the XP adjustment came from
+     * @param policy    adjustment policy for XP loss
+     */
+    void removeXP(Ref<EntityStore> entityRef, Store<EntityStore> store,
+                  String profileId, double amount, XPSource source, XPAdjustmentPolicy policy);
+
+    /**
      * Get the current level for an entity in a profile.
      *
      * @param entityRef the live entity handle

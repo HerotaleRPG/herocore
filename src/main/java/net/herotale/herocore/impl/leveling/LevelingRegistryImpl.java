@@ -69,44 +69,88 @@ public class LevelingRegistryImpl implements LevelingRegistry {
             }
         }
 
+        applyXpDelta(entityRef, store, profile, profileId, Math.round(amount), true);
+    }
+
+    @Override
+    public void removeXP(Ref<EntityStore> entityRef, Store<EntityStore> store,
+                         String profileId, double amount, XPSource source, XPAdjustmentPolicy policy) {
+        LevelingProfile profile = profiles.get(profileId);
+        if (profile == null) {
+            throw new IllegalArgumentException("Unknown leveling profile: " + profileId);
+        }
+
+        if (!Double.isFinite(amount) || amount < 0) {
+            throw new IllegalArgumentException("amount must be a finite, non-negative XP loss value");
+        }
+
+        double adjustedAmount = amount;
+        XPAdjustmentPolicy effectivePolicy = policy != null ? policy : XPAdjustmentPolicy.APPLY_SOURCE_WEIGHT_ONLY;
+        if (effectivePolicy == XPAdjustmentPolicy.APPLY_SOURCE_WEIGHT_ONLY
+                || effectivePolicy == XPAdjustmentPolicy.CUSTOM) {
+            double sourceWeight = sourceWeights.getOrDefault(source, 1.0);
+            adjustedAmount *= sourceWeight;
+        }
+
+        applyXpDelta(entityRef, store, profile, profileId, -Math.round(adjustedAmount), false);
+    }
+
+    private void applyXpDelta(Ref<EntityStore> entityRef, Store<EntityStore> store,
+                              LevelingProfile profile, String profileId,
+                              long deltaXp, boolean clampToProfileMax) {
+
         // Read current progression for this profile from the entity's component
         HeroCoreProgressionComponent progression = store.getComponent(
                 entityRef, HeroCoreProgressionComponent.getComponentType());
         if (progression == null) return;
 
         HeroCoreProgressionComponent.ProfileProgressData data = progression.getProgress(profileId);
-        int oldLevel = data.getLevel();
-        long currentXp = (long) data.getCurrentXP();
-        currentXp += Math.round(amount);
+        ProgressDeltaResult result = computeProgressDelta(profile, data, deltaXp, clampToProfileMax);
 
-        // Clamp XP to max
-        long maxXp = profile.getXpCurve().getThreshold(profile.getMaxLevel());
-        if (maxXp > 0) {
-            currentXp = Math.min(currentXp, maxXp);
+        // Write back to the entity's component for this profile only
+        progression.setProgress(profileId, result.updatedData());
+
+        // Fire level change events via Store.invoke() (store takes a buffer internally).
+        if (result.newLevel() > result.oldLevel()) {
+            store.invoke(entityRef, new LevelUpEvent(profileId, result.oldLevel(), result.newLevel()));
+        } else if (result.newLevel() < result.oldLevel()) {
+            store.invoke(entityRef, new LevelDownEvent(profileId, result.oldLevel(), result.newLevel()));
+        }
+    }
+
+    static ProgressDeltaResult computeProgressDelta(LevelingProfile profile,
+                                                    HeroCoreProgressionComponent.ProfileProgressData currentData,
+                                                    long deltaXp,
+                                                    boolean clampToProfileMax) {
+        int oldLevel = currentData.getLevel();
+        long currentXp = (long) currentData.getCurrentXP();
+        currentXp += deltaXp;
+        currentXp = Math.max(0, currentXp);
+
+        if (clampToProfileMax) {
+            long maxXp = profile.getXpCurve().getThreshold(profile.getMaxLevel());
+            if (maxXp > 0) {
+                currentXp = Math.min(currentXp, maxXp);
+            }
         }
 
-        // Recalculate level
         int newLevel = profile.getXpCurve().getLevel(currentXp);
         newLevel = Math.min(newLevel, profile.getMaxLevel());
 
-        // XP to next level for this profile
         float xpToNext = 0f;
         if (newLevel < profile.getMaxLevel()) {
             long nextThreshold = profile.getXpCurve().getThreshold(newLevel + 1);
             xpToNext = (float) (nextThreshold - currentXp);
         }
 
-        // Write back to the entity's component for this profile only
-        progression.setProgress(profileId, new HeroCoreProgressionComponent.ProfileProgressData(
-                newLevel, (float) currentXp, xpToNext));
-
-        // Fire level change events via Store.invoke() (store takes a buffer internally).
-        if (newLevel > oldLevel) {
-            store.invoke(entityRef, new LevelUpEvent(profileId, oldLevel, newLevel));
-        } else if (newLevel < oldLevel) {
-            store.invoke(entityRef, new LevelDownEvent(profileId, oldLevel, newLevel));
-        }
+        HeroCoreProgressionComponent.ProfileProgressData updatedData =
+                new HeroCoreProgressionComponent.ProfileProgressData(newLevel, (float) currentXp, xpToNext);
+        return new ProgressDeltaResult(oldLevel, newLevel, updatedData);
     }
+
+    record ProgressDeltaResult(int oldLevel,
+                               int newLevel,
+                               HeroCoreProgressionComponent.ProfileProgressData updatedData) {}
 
     @Override
     public int getLevel(Ref<EntityStore> entityRef, Store<EntityStore> store, String profileId) {
